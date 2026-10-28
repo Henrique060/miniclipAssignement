@@ -27,6 +27,8 @@ class MidPriorityChecks(Checks):
         if deleted_uuids:
             for uuid in deleted_uuids:
                 self.feedback.append(f"UUID removed in new version: '{uuid}'")
+        
+        
 
     def get_feedback(self):
         """ Returns feedback related to Low-Priority checks """
@@ -63,3 +65,5 @@ class MidPriorityChecks(Checks):
 
 
         return removed, added
+    
+    

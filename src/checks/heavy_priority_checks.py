@@ -38,7 +38,7 @@ class HeavyPriorityChecks(Checks):
         return doc_vers.xpath("//key[following-sibling::*[1][self::string]][not(.='version')]")
     
 
-    def set_feedback(self, mismatched=None, missing_pairs=None, erratic_entries=None):
+    def set_feedback(self, mismatched=None, missing_pairs=None, erratic_entries=None, unclosed_brackets=None):
         """ Fetches feedback and turns the results into readable lines. """
         for uuid, lang in missing_pairs or []:
             self.feedback.append(f"[{lang}] Empty translation in {uuid}")
@@ -54,6 +54,9 @@ class HeavyPriorityChecks(Checks):
 
         for lang, count, expected in mismatched or []:
             self.feedback.append(f"[{lang}] Count mismatch: found {count} entries, expected {expected}")
+
+        for uuid, lang, text in unclosed_brackets or []:
+            self.feedback.append(f"[{lang}] Unclosed bracket '[' in {uuid}\n Text : \"{text}\"")
 
     def get_feedback(self):
         """ Returns feedback related to Low-Priority checks """
@@ -137,18 +140,18 @@ class HeavyPriorityChecks(Checks):
             translations = {}
             for k in lang_nodes:
                 val_node = k.getnext()
-                translations[k.text] = val_node.text if val_node is not None else ""
+                translations[k.text] = (val_node.text or "") if val_node is not None else ""
             
             en_key = next((k for k in translations if k.startswith("en")), None) #default "None" for debugging purposes in the feedback
             en_text = translations.get(en_key, "") if en_key else ""
 
-            en_tokens = Counter(valid_placeholder_pattern.findall(en_text))
+            en_tokens = Counter(valid_placeholder_pattern.findall(en_text.replace("%%", "")))
 
             for key, text in translations.items():
                 if not text: #if the string is empty, have to flag issue
                     continue
 
-                broken_tokens = erratic_placeholder_pattern.findall(text) 
+                broken_tokens = erratic_placeholder_pattern.findall(text.replace("%%", "")) 
                 for token in broken_tokens:
                     erratic_entries.append({"uuid" : uuid,
                                             "key" : key,
@@ -158,7 +161,7 @@ class HeavyPriorityChecks(Checks):
                 
                 #now to compare against the english baseline 
                 if en_key and key != en_key:
-                    curr_tokens = Counter(valid_placeholder_pattern.findall(text))
+                    curr_tokens = Counter(valid_placeholder_pattern.findall(text.replace("%%", "")))
                     missing_from_lang = en_tokens - curr_tokens
                     extra_in_lang = curr_tokens - en_tokens
                     if missing_from_lang or extra_in_lang:
@@ -173,3 +176,21 @@ class HeavyPriorityChecks(Checks):
                                                 "en_text": en_text,
                                                 "problem": "Placeholder mismatch: " + ", ".join(problems)})
         return erratic_entries
+    
+    def validate_custom_bracket_tags(self):
+        """
+        :returns unclosed : the uuid and text (location)
+        Checks if any '[' is not closed by a ']' before the next '[' or end of string.
+        """
+        unclosed = list()
+        unclosed_pattern = re.compile(r"\[[^\]]*(?:\[|$)")
+
+        for key in self.new_ver.xpath("//key[following-sibling::*[1][self::string]][not(.='version')]"):
+            val_elem = key.getnext()
+            text = (val_elem.text or "") if val_elem is not None else ""
+
+            if unclosed_pattern.search(text):
+                uuid = key.getparent().getprevious().text
+                unclosed.append((uuid, key.text, text))
+
+        return unclosed

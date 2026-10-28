@@ -1,11 +1,14 @@
 import argparse
 import sys
+from pathlib import Path
+from lxml import etree
+
 from checks.heavy_priority_checks import HeavyPriorityChecks
 from checks.mid_priority_checks import MidPriorityChecks
 from checks.low_priority_checks import LowPriorityChecks
 from checks.load_loc_docs import LoadLocDocs
 
-# ANSI Terminal Colors
+#ANSI Terminal Colors
 RED = "\033[91m"
 YELLOW = "\033[93m"
 BLUE = "\033[94m"
@@ -16,17 +19,17 @@ RESET = "\033[0m"
 XQUERY_LOC = "//key[following-sibling::*[1][self::string]]/text()"
 XQUERY_VER_NR = "/plist/dict/key[.='version']/following-sibling::string[1]/text()"
 
+BASE_DIR = Path(__file__).resolve().parent.parent 
+DOCS_DIR = BASE_DIR / "docs"
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Localization pre-flight check.")
+    parser = argparse.ArgumentParser(description="Localization check.")
     parser.add_argument(
-        "--current", default="../docs/localisations_1_2_0.plist", help="Path to base version"
+        "--current", default=DOCS_DIR / "localisations_1_2_0.plist", help="Path to base version"
     )
     parser.add_argument(
-        "--new", default="../docs/localisations_1_2_1.plist", help="Path to candidate version"
-    )
-    parser.add_argument(
-        "--icons", default="./xml_icon_checks.json", help="Path to icon/placeholder JSON"
+        "--new", default=DOCS_DIR / "localisations_1_2_1.plist", help="Path to candidate version"
     )
     parser.add_argument(
         "--fail-on",
@@ -49,9 +52,13 @@ def print_section(title, color, items):
 def main():
     args = parse_args()
 
-    docs = LoadLocDocs(args.current, args.new)
-    doc_curr = docs.get_current_ver()
-    doc_new = docs.get_new_ver()
+    try:
+        docs = LoadLocDocs(args.current, args.new)
+        doc_curr = docs.get_current_ver()
+        doc_new = docs.get_new_ver()
+    except (OSError, etree.XMLSyntaxError) as e:
+        print(f"{RED}Could not load the .plist files:{RESET} {e}", file=sys.stderr)
+        sys.exit(2)
 
     ##Initializing the 3 check scripts
     low = LowPriorityChecks(doc_curr, doc_new)
@@ -70,9 +77,10 @@ def main():
     erratic = heavy.validate_erratic_placeholder()
     missing_pairs = heavy.validate_empty_string_loc()
     mismatched = heavy.validate_key_loc_number(doc_new, uuid_key_nr)
+    validate_brackets = heavy.validate_custom_bracket_tags()
 
     ##Set the feedbacks
-    heavy.set_feedback(mismatched, missing_pairs, erratic)
+    heavy.set_feedback(mismatched, missing_pairs, erratic, validate_brackets)
     mid.set_feedback(removed, added, validate_key_diff_mid)
     low.set_feedback(new_version, status, validate_key_diff_low)
 
@@ -85,9 +93,9 @@ def main():
     print(f"\n{BOLD}Localization Audit Report{RESET}")
     print("-" * 30)
 
-    print_section("CRITICAL ISSUES (Blockers)", RED, critical_issues)
-    print_section("MODERATE ISSUES (Warnings)", YELLOW, moderate_issues)
-    print_section("NON-CRITICAL ISSUES (Info)", BLUE, low_issues)
+    print_section("CRITICAL ISSUES (BLOCKERS)", RED, critical_issues)
+    print_section("MODERATE ISSUES (WARNINGS)", YELLOW, moderate_issues)
+    print_section("NON-CRITICAL ISSUES (INFO)", BLUE, low_issues)
 
     has_critical = bool(critical_issues)
     has_moderate = bool(moderate_issues)
